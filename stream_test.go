@@ -36,7 +36,7 @@ func setup(t *testing.T) (context.Context, radix.Conn, *is.I) {
 	rand.Seed(time.Now().UnixNano())
 	is := is.New(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
 	c, err := radix.Dial(ctx, "tcp", "127.0.0.1:6379")
@@ -175,10 +175,47 @@ func TestFields(t *testing.T) {
 	ii.Equal(e3.Timestamp, t0)
 }
 
+func TestBench01(t *testing.T) {
+	ctx, c, ii := setup(t)
+
+	const (
+		total   = 10000
+		payload = 64
+	)
+
+	b := make([]byte, payload)
+	_, err := rand.Read(b)
+	ii.NoErr(err)
+
+	s := rredis.NewStream(c, ns, stream)
+	ii.NoErr(err)
+
+	t0 := time.Now()
+
+	go func() {
+		for i := 0; i < total; i++ {
+			err := s.Insert(ctx, b)
+			ii.NoErr(err)
+		}
+		delta := time.Since(t0)
+		fmt.Printf("Publish done after %s, %.1f msgs/sec\n", delta, total/delta.Seconds())
+	}()
+
+	sc, err := s.Stream(ctx, "")
+	ii.NoErr(err)
+
+	for i := 0; i < total; i++ {
+		_, err := sc.Recv()
+		ii.NoErr(err)
+	}
+
+	delta := time.Since(t0)
+
+	fmt.Printf("Duration=%dms, Total=%d, Payload=%d bytes, Throughput=%.0f msgs/sec\n", delta.Milliseconds(), total, payload, total/delta.Seconds())
+}
+
 type testType int
 
 func (t testType) ReflexType() int {
 	return int(t)
 }
-
-
